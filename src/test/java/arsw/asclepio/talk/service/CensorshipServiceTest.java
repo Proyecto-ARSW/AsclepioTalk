@@ -39,7 +39,11 @@ class CensorshipServiceTest {
 
     @BeforeEach
     void setupRedis() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        // lenient porque algunos tests hacen short-circuit antes de tocar Redis
+        // (contenido vacío, palabra duplicada detectada por DB). Strict mode
+        // marcaría esos casos como UnnecessaryStubbing, pero el stub es válido
+        // para los tests que sí leen el cache.
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
     @Test
@@ -75,6 +79,92 @@ class CensorshipServiceTest {
 
         assertThat(result.wasCensored()).isTrue();
         assertThat(result.displayContent()).isEqualTo("No seas *****");
+    }
+
+    @Test
+    @DisplayName("Censura detecta mayúsculas mezcladas en mitad de palabra")
+    void censorDetectsMixedCase() {
+        when(valueOps.get("talk:censored_words")).thenReturn(null);
+        when(wordRepo.findAllActiveWords()).thenReturn(List.of("tonto"));
+
+        CensorResult result = service.censor("Eres ToNtO de remate");
+
+        assertThat(result.wasCensored()).isTrue();
+        assertThat(result.displayContent()).isEqualTo("Eres ***** de remate");
+    }
+
+    @Test
+    @DisplayName("Censura sustituye letras por dígitos leet (t0nt0)")
+    void censorDetectsLeetDigits() {
+        when(valueOps.get("talk:censored_words")).thenReturn(null);
+        when(wordRepo.findAllActiveWords()).thenReturn(List.of("tonto"));
+
+        CensorResult result = service.censor("ese t0nt0 no entiende");
+
+        assertThat(result.wasCensored()).isTrue();
+        assertThat(result.displayContent()).isEqualTo("ese ***** no entiende");
+    }
+
+    @Test
+    @DisplayName("Censura combina mayúsculas y leet en la misma palabra (T0Nt@)")
+    void censorDetectsMixedLeetAndCase() {
+        when(valueOps.get("talk:censored_words")).thenReturn(null);
+        when(wordRepo.findAllActiveWords()).thenReturn(List.of("tonta"));
+
+        CensorResult result = service.censor("No seas T0Nt@ por favor");
+
+        assertThat(result.wasCensored()).isTrue();
+        assertThat(result.displayContent()).isEqualTo("No seas ***** por favor");
+    }
+
+    @Test
+    @DisplayName("Censura respeta límites: 'idiotas' no matchea 'idiota' (sufijo)")
+    void censorRespectsWordBoundary() {
+        when(valueOps.get("talk:censored_words")).thenReturn(null);
+        when(wordRepo.findAllActiveWords()).thenReturn(List.of("idiota"));
+
+        // Importante: si la palabra censurada es exactamente "idiota",
+        // "idiotas" debe quedar intacto. Si el admin quiere ambas, agrega ambas.
+        CensorResult result = service.censor("los idiotas no");
+
+        assertThat(result.wasCensored()).isFalse();
+        assertThat(result.displayContent()).isEqualTo("los idiotas no");
+    }
+
+    @Test
+    @DisplayName("Censura múltiples ocurrencias en el mismo mensaje")
+    void censorAllOccurrences() {
+        when(valueOps.get("talk:censored_words")).thenReturn(null);
+        when(wordRepo.findAllActiveWords()).thenReturn(List.of("tonto"));
+
+        CensorResult result = service.censor("tonto y otra vez T0nT0");
+
+        assertThat(result.wasCensored()).isTrue();
+        assertThat(result.displayContent()).isEqualTo("***** y otra vez *****");
+    }
+
+    @Test
+    @DisplayName("Censura múltiples palabras prohibidas distintas")
+    void censorMultipleWords() {
+        when(valueOps.get("talk:censored_words")).thenReturn(null);
+        when(wordRepo.findAllActiveWords()).thenReturn(List.of("tonto", "idiota"));
+
+        CensorResult result = service.censor("tonto e idiota");
+
+        assertThat(result.wasCensored()).isTrue();
+        assertThat(result.displayContent()).isEqualTo("***** e *****");
+    }
+
+    @Test
+    @DisplayName("Texto null o vacío no se procesa")
+    void emptyContentShortCircuits() {
+        CensorResult resultNull = service.censor(null);
+        CensorResult resultBlank = service.censor("   ");
+
+        assertThat(resultNull.wasCensored()).isFalse();
+        assertThat(resultBlank.wasCensored()).isFalse();
+        // Sin acceso a Redis cuando el contenido no amerita procesamiento.
+        verifyNoInteractions(valueOps);
     }
 
     @Test

@@ -55,7 +55,10 @@ class ConversationServiceTest {
                 .build();
 
         when(conversationRepo.save(any())).thenReturn(saved);
-        when(conversationRepo.findById(saved.getId())).thenReturn(Optional.of(saved));
+        // Tras refactor: ConversationService construye la response consultando
+        // participants directamente al repo (no re-leyendo la conversation),
+        // para evitar el bug del @OneToMany vacío en el cache de Hibernate.
+        when(participantRepo.findActiveByConversation(saved.getId())).thenReturn(List.of());
 
         CreateConversationRequest req = new CreateConversationRequest(
                 ConversationType.INDIVIDUAL, null, null,

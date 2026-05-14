@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: arsw.asclepio.talk.service.MessageServiceTest
+-------------------------------------------------------------------------------
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.073 s -- in arsw.asclepio.talk.service.MessageServiceTest

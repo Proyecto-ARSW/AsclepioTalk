@@ -58,4 +58,16 @@ public class Conversation {
     @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
     private List<Participant> participants = new ArrayList<>();
+
+    // Garantiza que updatedAt nunca sea null en el INSERT. Hibernate
+    // @UpdateTimestamp lo establece al guardar por primera vez, pero algunas
+    // combinaciones de dialecto/driver lo dejan null hasta el primer UPDATE,
+    // provocando que el frontend recibiera updatedAt vacío y mostrara
+    // "Invalid date" hasta que el grupo se editaba por primera vez.
+    @PrePersist
+    void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+        if (createdAt == null) createdAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
 }

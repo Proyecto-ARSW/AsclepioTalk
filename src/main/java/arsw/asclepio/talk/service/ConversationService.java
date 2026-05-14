@@ -60,10 +60,7 @@ public class ConversationService {
                     addParticipant(conv, creator.userId(), creator.fullName(), creator.rol());
                     addParticipant(conv, other.userId(), other.userName(), other.userRol());
 
-                    ConversationResponse response = ConversationResponse.from(
-                            conversationRepo.findById(conv.getId()).orElseThrow(),
-                            creator.userId()
-                    );
+                    ConversationResponse response = buildResponseWithFreshParticipants(conv, creator.userId());
                     notifier.notifyNewConversation(other.userId(), response);
                     return response;
                 });
@@ -88,10 +85,7 @@ public class ConversationService {
                 addParticipant(conv, p.userId(), p.userName(), p.userRol())
         );
 
-        ConversationResponse response = ConversationResponse.from(
-                conversationRepo.findById(conv.getId()).orElseThrow(),
-                creator.userId()
-        );
+        ConversationResponse response = buildResponseWithFreshParticipants(conv, creator.userId());
 
         // Notificar a todos los invitados
         req.participants().forEach(p -> notifier.notifyNewConversation(p.userId(), response));
@@ -178,6 +172,20 @@ public class ConversationService {
                     .userRol(userRol)
                     .build());
         }
+    }
+
+    // Construye la ConversationResponse consultando los Participant directamente
+    // por convId en lugar de depender de conv.getParticipants(). Esto evita un
+    // bug del persistence context: la entidad Conversation que acabamos de save()
+    // queda managed con su lista @OneToMany aún vacía (el builder la inicializa
+    // como ArrayList vacío y los participants insertados después por separado
+    // no se sincronizan automáticamente con esa colección). conversationRepo
+    // .findById() retorna la misma instancia en cache, así que tampoco recarga.
+    // Resultado: el frontend recibía participants=[] hasta el primer update.
+    private ConversationResponse buildResponseWithFreshParticipants(Conversation conv, UUID viewerId) {
+        List<arsw.asclepio.talk.domain.conversation.Participant> participants =
+                participantRepo.findActiveByConversation(conv.getId());
+        return ConversationResponse.fromWithParticipants(conv, participants, viewerId);
     }
 
     private Conversation findActive(UUID id) {
