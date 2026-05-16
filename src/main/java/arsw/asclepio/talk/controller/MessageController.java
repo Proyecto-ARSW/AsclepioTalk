@@ -1,10 +1,13 @@
 package arsw.asclepio.talk.controller;
 
+import arsw.asclepio.talk.dto.request.AddReactionRequest;
 import arsw.asclepio.talk.dto.request.EditMessageRequest;
+import arsw.asclepio.talk.dto.request.MarkAsReadRequest;
 import arsw.asclepio.talk.dto.request.SendMessageRequest;
 import arsw.asclepio.talk.dto.response.MessageResponse;
 import arsw.asclepio.talk.security.UserPrincipal;
 import arsw.asclepio.talk.service.MessageService;
+import arsw.asclepio.talk.service.ReactionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -16,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 // Daniel Useche
@@ -25,6 +29,7 @@ import java.util.UUID;
 public class MessageController {
 
     private final MessageService messageService;
+    private final ReactionService reactionService;
 
     @GetMapping
     public Page<MessageResponse> list(
@@ -67,6 +72,63 @@ public class MessageController {
             @PathVariable UUID messageId,
             Authentication auth) {
         return messageService.censorManually(conversationId, messageId, principal(auth));
+    }
+
+    // ─── Read receipts ─────────────────────────────────────────────────────────
+
+    // Devuelve 204 — la operación es idempotente y no necesita retornar payload.
+    // El cliente recibirá la actualización vía WS (MESSAGE_READ).
+    @PostMapping("/read")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void markAsRead(
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody MarkAsReadRequest req,
+            Authentication auth) {
+        messageService.markAsRead(conversationId, req.messageIds(), principal(auth));
+    }
+
+    // ─── Reactions ─────────────────────────────────────────────────────────────
+
+    @PostMapping("/{messageId}/reactions")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void addReaction(
+            @PathVariable UUID conversationId,
+            @PathVariable UUID messageId,
+            @Valid @RequestBody AddReactionRequest req,
+            Authentication auth) {
+        reactionService.add(conversationId, messageId, req.emoji(), principal(auth));
+    }
+
+    // El emoji va en el path para que el DELETE sea idempotente y RESTful
+    // (sin body). Frontend debe URL-encode el emoji.
+    @DeleteMapping("/{messageId}/reactions/{emoji}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeReaction(
+            @PathVariable UUID conversationId,
+            @PathVariable UUID messageId,
+            @PathVariable String emoji,
+            Authentication auth) {
+        reactionService.remove(conversationId, messageId, emoji, principal(auth));
+    }
+
+    // ─── Pin / Unpin ───────────────────────────────────────────────────────────
+
+    // PATCH toggle: simplifica al cliente (no necesita saber el estado actual).
+    @PatchMapping("/{messageId}/pin")
+    public MessageResponse togglePin(
+            @PathVariable UUID conversationId,
+            @PathVariable UUID messageId,
+            Authentication auth) {
+        return messageService.togglePin(conversationId, messageId, principal(auth));
+    }
+
+    // Listado de fijados. Lo mantenemos bajo el prefijo /messages porque
+    // son mensajes — un drawer en la UI los lista por encima del scroll regular.
+    @GetMapping("/pinned")
+    public List<MessageResponse> getPinned(
+            @PathVariable UUID conversationId,
+            Authentication auth) {
+        return messageService.getPinned(conversationId, principal(auth));
     }
 
     private UserPrincipal principal(Authentication auth) {

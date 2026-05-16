@@ -71,6 +71,22 @@ public class Message {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    // Reply / quote: si no es null, este mensaje está respondiendo a otro.
+    // No es FK gestionada por JPA para evitar cargar el padre en cada fetch;
+    // el snippet se reconstruye en el DTO con una query batch (evita N+1).
+    @Column(name = "reply_to_message_id")
+    private UUID replyToMessageId;
+
+    @Column(name = "pinned", nullable = false)
+    @Builder.Default
+    private boolean pinned = false;
+
+    @Column(name = "pinned_by")
+    private UUID pinnedBy;
+
+    @Column(name = "pinned_at")
+    private LocalDateTime pinnedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
