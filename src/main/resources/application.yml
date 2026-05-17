@@ -5,6 +5,15 @@ spring:
   application:
     name: asclepio-talk
 
+  # Excluimos FlywayAutoConfiguration para que Spring Boot ni siquiera registre
+  # el bean de migracion. Asi, aunque Azure App Service defina por error
+  # SPRING_FLYWAY_ENABLED=true en las Application settings, no hay autoconfig
+  # que reactivar: las V1..V9 ya estan aplicadas a mano en la BD Azure y un
+  # nuevo intento de Flyway rompe el arranque con "table already exists".
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/asclepio?currentSchema=talk}
     driver-class-name: org.postgresql.Driver
@@ -19,11 +28,6 @@ spring:
         default_schema: talk
         format_sql: false
     show-sql: false
-
-  flyway:
-    # Migraciones aplicadas a mano sobre la BD Azure; se desactiva Flyway para
-    # que Spring no intente versionar ni tocar el schema en cada arranque.
-    enabled: false
 
   data:
     redis:
