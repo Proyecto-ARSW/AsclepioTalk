@@ -2,11 +2,14 @@ package arsw.asclepio.talk.service;
 
 import arsw.asclepio.talk.domain.conversation.ParticipantRepository;
 import arsw.asclepio.talk.domain.message.Message;
+import arsw.asclepio.talk.domain.message.MessageAttachment;
+import arsw.asclepio.talk.domain.message.MessageAttachmentRepository;
 import arsw.asclepio.talk.domain.message.MessageReactionRepository;
 import arsw.asclepio.talk.domain.message.MessageReadRepository;
 import arsw.asclepio.talk.domain.message.MessageRepository;
 import arsw.asclepio.talk.dto.request.EditMessageRequest;
 import arsw.asclepio.talk.dto.request.SendMessageRequest;
+import arsw.asclepio.talk.dto.response.AttachmentResponse;
 import arsw.asclepio.talk.dto.response.MessageResponse;
 import arsw.asclepio.talk.dto.response.ReactionGroupResponse;
 import arsw.asclepio.talk.dto.response.ReadReceiptResponse;
@@ -22,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -40,13 +44,30 @@ public class MessageService {
     private final MessageRepository messageRepo;
     private final MessageReactionRepository reactionRepo;
     private final MessageReadRepository readRepo;
+    private final MessageAttachmentRepository attachmentRepo;
     private final ParticipantRepository participantRepo;
     private final CensorshipService censorshipService;
+    private final AttachmentStorageService storageService;
     private final WebSocketNotifier notifier;
 
     @Transactional
     public MessageResponse send(UUID conversationId, SendMessageRequest req, UserPrincipal sender) {
+        return send(conversationId, req, null, sender);
+    }
+
+    // Sobrecarga con adjunto opcional. Cuando `file` es null, el flujo es
+    // identico al de solo-texto. Si viene file, validamos el contenido (puede
+    // estar vacio si solo se envia el archivo) y subimos a MinIO antes de
+    // persistir el mensaje para que un fallo de storage no deje mensaje huerfano.
+    @Transactional
+    public MessageResponse send(UUID conversationId, SendMessageRequest req, MultipartFile file, UserPrincipal sender) {
         requireParticipant(conversationId, sender.userId());
+
+        boolean hasFile = file != null && !file.isEmpty();
+        String rawContent = req.content() == null ? "" : req.content();
+        if (rawContent.isBlank() && !hasFile) {
+            throw new IllegalArgumentException("El mensaje debe tener texto o un archivo adjunto");
+        }
 
         // Validamos el reply ANTES de crear el mensaje. Si el padre no existe
         // o está en otra conversación, abortamos limpio — no creamos basura.
@@ -57,23 +78,52 @@ public class MessageService {
                     .orElseThrow(() -> new MessageNotFoundException(req.replyToMessageId()));
         }
 
-        CensorResult censored = censorshipService.censor(req.content());
+        // Sube primero — si truena, nada se persistio.
+        AttachmentStorageService.StoredFile stored = hasFile
+                ? storageService.upload(conversationId, file)
+                : null;
 
-        Message msg = messageRepo.save(Message.builder()
-                .conversationId(conversationId)
-                .senderId(sender.userId())
-                .senderName(sender.fullName())
-                .contentOriginal(req.content())
-                .contentDisplay(censored.displayContent())
-                .autoCensored(censored.wasCensored())
-                .replyToMessageId(parent != null ? parent.getId() : null)
-                .build());
+        try {
+            CensorResult censored = censorshipService.censor(rawContent);
 
-        // Mensaje recién creado: aún no tiene reacciones ni lecturas.
-        MessageResponse response = MessageResponse.from(
-                msg, sender, parent, Collections.emptyList(), Collections.emptyList());
-        notifier.broadcastMessage(conversationId, WsMessageEvent.newMessage(conversationId, response));
-        return response;
+            Message msg = messageRepo.save(Message.builder()
+                    .conversationId(conversationId)
+                    .senderId(sender.userId())
+                    .senderName(sender.fullName())
+                    .contentOriginal(rawContent)
+                    .contentDisplay(censored.displayContent())
+                    .autoCensored(censored.wasCensored())
+                    .replyToMessageId(parent != null ? parent.getId() : null)
+                    .build());
+
+            MessageAttachment savedAttachment = null;
+            if (stored != null) {
+                savedAttachment = attachmentRepo.save(MessageAttachment.builder()
+                        .messageId(msg.getId())
+                        .storageKey(stored.storageKey())
+                        .fileName(stored.fileName())
+                        .mimeType(stored.mimeType())
+                        .sizeBytes(stored.sizeBytes())
+                        .uploadedBy(sender.userId())
+                        .build());
+            }
+
+            // Mensaje recién creado: aún no tiene reacciones ni lecturas.
+            AttachmentResponse attachmentDto = savedAttachment == null
+                    ? null
+                    : AttachmentResponse.from(savedAttachment, storageService.presignedGetUrl(savedAttachment.getStorageKey()));
+            MessageResponse response = MessageResponse.from(
+                    msg, sender, parent, Collections.emptyList(), Collections.emptyList(), attachmentDto);
+            notifier.broadcastMessage(conversationId, WsMessageEvent.newMessage(conversationId, response));
+            return response;
+        } catch (RuntimeException ex) {
+            // Compensacion: si fallo persistiendo el mensaje o el attachment,
+            // borramos el blob para no dejarlo huerfano en MinIO.
+            if (stored != null) {
+                storageService.delete(stored.storageKey());
+            }
+            throw ex;
+        }
     }
 
     @Transactional(readOnly = true)
@@ -133,6 +183,14 @@ public class MessageService {
         msg.setContentDisplay("[Mensaje eliminado]");
 
         Message saved = messageRepo.save(msg);
+
+        // Best-effort: borramos el blob de MinIO si el mensaje tenia adjunto.
+        // El soft-delete del mensaje ya ocurrio en DB; si MinIO falla, lo
+        // registramos y seguimos — el frontend ya no mostrara el archivo
+        // porque MessageResponse oculta el attachment cuando deleted=true.
+        attachmentRepo.findFirstByMessageId(saved.getId())
+                .ifPresent(att -> storageService.delete(att.getStorageKey()));
+
         MessageResponse response = enrichSingleSelf(saved, user);
         notifier.broadcastMessage(conversationId, WsMessageEvent.deletedMessage(conversationId, response));
     }
@@ -243,10 +301,14 @@ public class MessageService {
         List<ReadReceiptResponse> reads = readRepo.findByMessageIds(List.of(m.getId())).stream()
                 .map(r -> new ReadReceiptResponse(r.getId().getUserId(), null, r.getReadAt()))
                 .toList();
-        return MessageResponse.from(m, user, parent, reactions, reads);
+        AttachmentResponse attachment = attachmentRepo.findFirstByMessageId(m.getId())
+                .map(a -> AttachmentResponse.from(a, storageService.presignedGetUrl(a.getStorageKey())))
+                .orElse(null);
+        return MessageResponse.from(m, user, parent, reactions, reads, attachment);
     }
 
-    // Versión batch eficiente: 3 queries totales para N mensajes.
+    // Versión batch eficiente: 4 queries totales para N mensajes
+    // (reply parents + reactions + reads + attachments).
     private List<MessageResponse> enrichBatch(List<Message> messages, UserPrincipal user) {
         if (messages.isEmpty()) {
             return Collections.emptyList();
@@ -275,13 +337,27 @@ public class MessageService {
                                         r -> new ReadReceiptResponse(r.getId().getUserId(), null, r.getReadAt()),
                                         Collectors.toList())));
 
+        // Adjuntos en una sola query — 1 maximo por mensaje hoy, pero usamos
+        // groupingBy para no asumir; nos quedamos con el primero si por algun
+        // motivo hubiera mas (defensiva).
+        Map<UUID, MessageAttachment> attachmentByMsg =
+                attachmentRepo.findByMessageIdIn(ids).stream()
+                        .collect(Collectors.toMap(
+                                MessageAttachment::getMessageId,
+                                a -> a,
+                                (a, b) -> a));
+
         return messages.stream()
                 .map(m -> {
                     Message parent = m.getReplyToMessageId() != null ? parentsById.get(m.getReplyToMessageId()) : null;
                     List<ReactionGroupResponse> reactions = ReactionGroupResponse.groupBy(
                             rawReactions.getOrDefault(m.getId(), Collections.emptyList()));
                     List<ReadReceiptResponse> reads = readsByMsg.getOrDefault(m.getId(), Collections.emptyList());
-                    return MessageResponse.from(m, user, parent, reactions, reads);
+                    MessageAttachment att = attachmentByMsg.get(m.getId());
+                    AttachmentResponse attachment = att == null
+                            ? null
+                            : AttachmentResponse.from(att, storageService.presignedGetUrl(att.getStorageKey()));
+                    return MessageResponse.from(m, user, parent, reactions, reads, attachment);
                 })
                 .toList();
     }

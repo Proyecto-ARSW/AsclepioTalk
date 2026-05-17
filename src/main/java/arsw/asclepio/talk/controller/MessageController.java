@@ -15,9 +15,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -45,6 +47,20 @@ public class MessageController {
             @Valid @RequestBody SendMessageRequest req,
             Authentication auth) {
         MessageResponse response = messageService.send(conversationId, req, principal(auth));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    // Variante multipart: el cliente manda `data` (JSON con SendMessageRequest)
+    // y `file` (binario). Spring deserializa `data` como @RequestPart porque
+    // el cliente le pone content-type=application/json al blob; sin eso, llega
+    // como String y la validacion @Valid no se aplica.
+    @PostMapping(path = "/with-attachment", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<MessageResponse> sendWithAttachment(
+            @PathVariable UUID conversationId,
+            @Valid @RequestPart("data") SendMessageRequest req,
+            @RequestPart("file") MultipartFile file,
+            Authentication auth) {
+        MessageResponse response = messageService.send(conversationId, req, file, principal(auth));
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

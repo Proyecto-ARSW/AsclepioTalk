@@ -1,14 +1,16 @@
 package arsw.asclepio.talk.dto.request;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
+// El `content` puede venir vacío cuando el mensaje lleva adjunto. La regla
+// "al menos texto o archivo" se valida en MessageService.send, donde tenemos
+// el contexto completo (la presencia del MultipartFile).
+//
 // Daniel Useche
 public record SendMessageRequest(
 
-        @NotBlank(message = "El contenido del mensaje no puede estar vacío")
         @Size(max = 4000, message = "El mensaje no puede superar 4000 caracteres")
         String content,
 

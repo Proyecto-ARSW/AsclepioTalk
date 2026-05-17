@@ -39,6 +39,28 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
+  servlet:
+    multipart:
+      # Limite logico de 10 MB en el service; aqui dejamos margen para que
+      # el rechazo claro venga de la capa de negocio con i18n, no del servlet
+      # con un error opaco.
+      max-file-size: 12MB
+      max-request-size: 15MB
+      enabled: true
+
+minio:
+  # endpoint que ve el backend (red docker: http://minio:9000)
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  # endpoint publico con el que se firman las URLs presignadas que abrira
+  # el browser — en dev coincide con el puerto publicado en el host.
+  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:asclepio}
+  secret-key: ${MINIO_SECRET_KEY:asclepio-minio-dev}
+  bucket: ${MINIO_BUCKET:talk-attachments}
+  # 10 minutos: tiempo suficiente para descargar/renderizar sin dejar la URL
+  # viva eternamente. El cliente refresca al hacer otro GET de la conv.
+  presigned-ttl-seconds: 600
+
 jwt:
   secret: ${JWT_SECRET:ASCLEPIO_ARSW-SECRET-2026-PROYECTO-HOSPITAL}
 

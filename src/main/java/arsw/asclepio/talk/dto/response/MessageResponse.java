@@ -32,13 +32,16 @@ public record MessageResponse(
         UUID pinnedBy,
         LocalDateTime pinnedAt,
         List<ReactionGroupResponse> reactions,
-        List<ReadReceiptResponse> readBy
+        List<ReadReceiptResponse> readBy,
+        // Adjunto opcional. Se omite (null) si el mensaje esta manualmente
+        // censurado y el viewer no es ADMIN — mismo patron que contentOriginal.
+        AttachmentResponse attachment
 ) {
     // Factory minimal — usado cuando aún no tenemos info de reactions/reads
     // (por ejemplo en el push WS de "MESSAGE" recién creado, donde aún no
     // hay reacciones ni lecturas registradas).
     public static MessageResponse from(Message m, UserPrincipal viewer) {
-        return from(m, viewer, null, Collections.emptyList(), Collections.emptyList());
+        return from(m, viewer, null, Collections.emptyList(), Collections.emptyList(), null);
     }
 
     // Factory enriquecido — el caller pasa los datos pre-cargados en batch
@@ -47,8 +50,15 @@ public record MessageResponse(
                                        UserPrincipal viewer,
                                        Message replyParent,
                                        List<ReactionGroupResponse> reactions,
-                                       List<ReadReceiptResponse> readBy) {
-        String original = viewer != null && viewer.isAdmin() ? m.getContentOriginal() : null;
+                                       List<ReadReceiptResponse> readBy,
+                                       AttachmentResponse attachment) {
+        boolean isAdmin = viewer != null && viewer.isAdmin();
+        String original = isAdmin ? m.getContentOriginal() : null;
+        // El adjunto se oculta a no-ADMIN cuando el mensaje esta censurado
+        // manualmente (idem para soft-deleted): el ADMIN sigue viendolo para
+        // auditar, igual que ya pasa con contentOriginal.
+        AttachmentResponse safeAttachment =
+                ((m.isManuallyCensored() || m.isDeleted()) && !isAdmin) ? null : attachment;
         return new MessageResponse(
                 m.getId(),
                 m.getConversationId(),
@@ -69,7 +79,8 @@ public record MessageResponse(
                 m.getPinnedBy(),
                 m.getPinnedAt(),
                 reactions == null ? Collections.emptyList() : reactions,
-                readBy == null ? Collections.emptyList() : readBy
+                readBy == null ? Collections.emptyList() : readBy,
+                safeAttachment
         );
     }
 }
