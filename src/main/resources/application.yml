@@ -1,5 +1,12 @@
 server:
   port: 3003
+  # include-stacktrace=never evita exponer el stack al cliente HTTP
+  # (seguridad); el stack sigue quedando en logs del servidor gracias al
+  # log.error del GlobalExceptionHandler. include-message=always permite
+  # al frontend mostrar el mensaje de errores 4xx legitimos.
+  error:
+    include-stacktrace: never
+    include-message: always
 
 spring:
   application:
@@ -90,14 +97,5 @@ logging:
     arsw.asclepio.talk: DEBUG
     io.lettuce.core: INFO
     org.springframework.data.redis: INFO
-
-# include-stacktrace=never evita exponer el stack al cliente HTTP (seguridad);
-# el stack sigue quedando en logs del servidor gracias al log.error del
-# GlobalExceptionHandler. include-message=always permite al frontend mostrar
-# el mensaje de errores 4xx legitimos (validacion, archivo grande, etc.).
-server:
-  error:
-    include-stacktrace: never
-    include-message: always
 
 # Daniel Useche
