@@ -21,9 +21,9 @@ spring:
     show-sql: false
 
   flyway:
-    schemas: talk
-    locations: classpath:db/migration
-    baseline-on-migrate: true
+    # Migraciones aplicadas a mano sobre la BD Azure; se desactiva Flyway para
+    # que Spring no intente versionar ni tocar el schema en cada arranque.
+    enabled: false
 
   data:
     redis:
