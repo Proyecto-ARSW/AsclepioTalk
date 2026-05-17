@@ -1,5 +1,6 @@
 package arsw.asclepio.talk.exception;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 // Daniel Useche
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -46,6 +48,11 @@ public class GlobalExceptionHandler {
     // service — el frontend lo muestra al usuario.
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
+        // WARN sin stacktrace: si es un 400 legitimo (validacion de negocio)
+        // solo queremos saber que ocurrio; si es un bug interno camuflado,
+        // el mensaje suele bastar para localizarlo. Subir a ERROR meteria
+        // ruido por cada request invalido del frontend.
+        log.warn("Argumento invalido: {}", ex.getMessage());
         return problem(HttpStatus.BAD_REQUEST, "invalid-argument", ex.getMessage());
     }
 
@@ -55,6 +62,10 @@ public class GlobalExceptionHandler {
     // ya valido en cliente.
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ProblemDetail handleMaxUploadSize(MaxUploadSizeExceededException ex) {
+        // WARN: el rechazo es esperado (limite del servlet), no necesitamos
+        // stacktrace. Solo dejamos rastro para detectar abusos o clientes
+        // que omiten la validacion local.
+        log.warn("Upload rechazado por tamano: {}", ex.getMessage());
         return problem(HttpStatus.PAYLOAD_TOO_LARGE, "file-too-large",
                 "El archivo supera el limite permitido");
     }
@@ -73,6 +84,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneric(Exception ex) {
+        // CRITICO: pasar `ex` como ultimo argumento del varargs hace que
+        // SLF4J imprima el stacktrace completo. Si solo pasamos ex.getMessage()
+        // perdemos la cadena de causas y nos quedamos ciegos en despliegue,
+        // que es justo el escenario que dispara este plan.
+        log.error("Excepcion no manejada en {} -> {}", ex.getClass().getSimpleName(), ex.getMessage(), ex);
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "internal-error", "Error interno del servidor");
     }
 
