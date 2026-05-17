@@ -1,11 +1,13 @@
 package arsw.asclepio.talk.service;
 
 import arsw.asclepio.talk.domain.conversation.ParticipantRepository;
+import arsw.asclepio.talk.domain.message.MessageAttachmentRepository;
 import arsw.asclepio.talk.domain.message.Message;
 import arsw.asclepio.talk.domain.message.MessageReactionRepository;
 import arsw.asclepio.talk.domain.message.MessageReadRepository;
 import arsw.asclepio.talk.domain.message.MessageRepository;
 import arsw.asclepio.talk.dto.request.SendMessageRequest;
+import arsw.asclepio.talk.service.AttachmentStorageService;
 import arsw.asclepio.talk.dto.response.MessageResponse;
 import arsw.asclepio.talk.exception.ForbiddenActionException;
 import arsw.asclepio.talk.exception.MessageNotFoundException;
@@ -34,12 +36,14 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class MessageServiceTest {
 
-    @Mock MessageRepository messageRepo;
-    @Mock MessageReactionRepository reactionRepo;
-    @Mock MessageReadRepository readRepo;
-    @Mock ParticipantRepository participantRepo;
-    @Mock CensorshipService censorshipService;
-    @Mock WebSocketNotifier notifier;
+        @Mock MessageRepository messageRepo;
+        @Mock MessageReactionRepository reactionRepo;
+        @Mock MessageReadRepository readRepo;
+        @Mock MessageAttachmentRepository attachmentRepo;
+        @Mock ParticipantRepository participantRepo;
+        @Mock CensorshipService censorshipService;
+        @Mock AttachmentStorageService storageService;
+        @Mock WebSocketNotifier notifier;
 
     @InjectMocks MessageService service;
 
