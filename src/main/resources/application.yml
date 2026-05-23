@@ -59,18 +59,22 @@ spring:
       max-request-size: 15MB
       enabled: true
 
-minio:
-  # endpoint que ve el backend (red docker: http://minio:9000)
-  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-  # endpoint publico con el que se firman las URLs presignadas que abrira
-  # el browser — en dev coincide con el puerto publicado en el host.
-  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
-  access-key: ${MINIO_ACCESS_KEY:asclepio}
-  secret-key: ${MINIO_SECRET_KEY:asclepio-minio-dev}
-  bucket: ${MINIO_BUCKET:talk-attachments}
-  # 10 minutos: tiempo suficiente para descargar/renderizar sin dejar la URL
-  # viva eternamente. El cliente refresca al hacer otro GET de la conv.
-  presigned-ttl-seconds: 600
+aws:
+  s3:
+    # Región donde está el bucket "asclepio-talk" en AWS.
+    region: ${AWS_S3_REGION:us-east-1}
+    access-key: ${AWS_S3_ACCESS_KEY:}
+    secret-key: ${AWS_S3_SECRET_KEY:}
+    # Solo requerido con cuentas de AWS Academy / Learner Lab (credenciales STS
+    # temporales). Con IAM permanente dejar vacío o no definir la variable.
+    session-token: ${AWS_S3_SESSION_TOKEN:}
+    # Alias del access point — el SDK lo trata como nombre de bucket normal;
+    # el access point define que el origen sea Internet (no VPC-only), lo que
+    # permite que las URLs presignadas sean accesibles desde cualquier browser.
+    bucket: ${AWS_S3_BUCKET:asclepiotalk-855aimish7w8j79xuug7ogud44g3kuse1a-s3alias}
+    # 10 minutos: tiempo suficiente para descargar/renderizar sin dejar la URL
+    # viva eternamente. El cliente refresca al hacer otro GET de la conv.
+    presigned-ttl-seconds: 600
 
 jwt:
   secret: ${JWT_SECRET:ASCLEPIO_ARSW-SECRET-2026-PROYECTO-HOSPITAL}
